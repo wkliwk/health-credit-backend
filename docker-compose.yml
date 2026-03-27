@@ -48,7 +48,7 @@ services:
       context: .
       target: dev
     ports:
-      - "${PORT:-3001}:3001"
+      - "${PORT:-3002}:3001"
     volumes:
       - ./src:/app/src
       - ./tsconfig.json:/app/tsconfig.json
