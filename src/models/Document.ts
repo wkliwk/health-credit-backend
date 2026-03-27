@@ -1,7 +1,27 @@
 import mongoose, { Schema, Document as MongoDocument } from 'mongoose';
 
+export type DocumentType =
+  | 'STI_PANEL'
+  | 'HIV'
+  | 'STI_PARTIAL'
+  | 'HEPATITIS'
+  | 'VACCINE'
+  | 'BLOOD_WORK'
+  | 'OTHER';
+
+export const DOCUMENT_TYPES: DocumentType[] = [
+  'STI_PANEL',
+  'HIV',
+  'STI_PARTIAL',
+  'HEPATITIS',
+  'VACCINE',
+  'BLOOD_WORK',
+  'OTHER',
+];
+
 export interface IDocument extends MongoDocument {
   userId: string;
+  documentType: DocumentType;
   fileName: string;
   mimeType: string;
   size: number;
@@ -16,6 +36,11 @@ export interface IDocument extends MongoDocument {
 const documentSchema = new Schema<IDocument>(
   {
     userId: { type: String, required: true, index: true },
+    documentType: {
+      type: String,
+      enum: DOCUMENT_TYPES,
+      default: 'OTHER',
+    },
     fileName: { type: String, required: true },
     mimeType: { type: String, required: true },
     size: { type: Number, required: true },
