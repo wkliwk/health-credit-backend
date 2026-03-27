@@ -14,9 +14,14 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testMatch": ["**/__tests__/**/*.test.ts"],
+    "testMatch": [
+      "**/__tests__/**/*.test.ts"
+    ],
     "testTimeout": 30000,
-    "coveragePathIgnorePatterns": ["/node_modules/", "/dist/"],
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ],
     "globals": {
       "ts-jest": {
         "tsconfig": "tsconfig.test.json"

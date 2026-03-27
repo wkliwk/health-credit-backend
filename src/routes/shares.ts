@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ShareModel } from '../models/Share';
+import { ShareViewModel } from '../models/ShareView';
 import { DocumentModel } from '../models/Document';
 import { getBlob } from '../services/storage';
 
@@ -69,6 +71,18 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
       expiresAt: { $gt: new Date() },
     }).sort({ createdAt: -1 });
 
+    // Fetch lastViewedAt for each share from ShareView collection
+    const shareIds = shares.map((s) => s._id);
+    const lastViews = await ShareViewModel.aggregate<{ _id: mongoose.Types.ObjectId; lastViewedAt: Date }>([
+      { $match: { shareId: { $in: shareIds } } },
+      { $sort: { viewedAt: -1 } },
+      { $group: { _id: '$shareId', lastViewedAt: { $first: '$viewedAt' } } },
+    ]);
+
+    const lastViewMap = new Map<string, Date>(
+      lastViews.map((v) => [v._id.toString(), v.lastViewedAt]),
+    );
+
     res.json(
       shares.map((s) => ({
         id: s._id,
@@ -79,6 +93,7 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
         maxViews: s.maxViews,
         viewCount: s.viewCount,
         createdAt: s.createdAt,
+        lastViewedAt: lastViewMap.get(s._id.toString()) ?? null,
       })),
     );
   } catch (error) {
@@ -115,6 +130,17 @@ router.get('/:token', async (req: Request, res: Response) => {
     share.viewCount += 1;
     share.viewLog.push({ viewedAt: new Date(), ipHash, userAgent });
     await share.save();
+
+    // Fire-and-forget: persist ShareView for audit trail (does not block response)
+    ShareViewModel.create({
+      shareId: share._id,
+      userId: share.userId,
+      viewedAt: new Date(),
+      recipientIp: crypto.createHash('sha256').update(ip).digest('hex'),
+      userAgent: (req.headers['user-agent'] ?? '').substring(0, 128),
+    }).catch((err: unknown) => {
+      console.error('ShareView create error:', err);
+    });
 
     // Get document metadata (not the blobs — client fetches those separately)
     const docs = await DocumentModel.find(
@@ -191,6 +217,44 @@ router.get('/:token/documents/:docId', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Download shared doc error:', error);
     res.status(500).json({ error: 'Failed to retrieve document' });
+  }
+});
+
+// Get view history for a share (owner only)
+router.get('/:shareId/views', authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    const share = await ShareModel.findById(req.params.shareId);
+
+    if (!share) {
+      res.status(404).json({ error: 'Share not found' });
+      return;
+    }
+
+    if (share.userId.toString() !== req.userId) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const views = await ShareViewModel.find({ shareId: share._id })
+      .sort({ viewedAt: -1 })
+      .limit(20)
+      .lean();
+
+    // Count unique viewers by distinct hashed IP
+    const uniqueIps = await ShareViewModel.distinct('recipientIp', { shareId: share._id });
+
+    res.json({
+      shareId: share._id,
+      totalViews: share.viewCount,
+      uniqueViewers: uniqueIps.length,
+      views: views.map((v) => ({
+        viewedAt: v.viewedAt,
+        userAgent: v.userAgent,
+      })),
+    });
+  } catch (error) {
+    console.error('Get share views error:', error);
+    res.status(500).json({ error: 'Failed to get share views' });
   }
 });
 

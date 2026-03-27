@@ -18,6 +18,7 @@ import mongoose from 'mongoose';
 import { app } from '../app';
 import { connectTestDB, closeTestDB, clearCollections, createTestUser } from './setup';
 import { ShareModel } from '../models/Share';
+import { ShareViewModel } from '../models/ShareView';
 
 beforeAll(async () => {
   await connectTestDB();
@@ -314,5 +315,183 @@ describe('GET /api/shares (list user shares)', () => {
     expect(res.status).toBe(200);
     // Only the active share should appear
     expect(res.body).toHaveLength(1);
+  });
+
+  it('includes lastViewedAt null when share has never been accessed', async () => {
+    const { token } = await createTestUser();
+    const docId = await uploadDocument(token);
+
+    await request(app)
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ documentIds: [docId], expiry: '24h' });
+
+    const res = await request(app)
+      .get('/api/shares')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body[0].lastViewedAt).toBeNull();
+  });
+
+  it('includes lastViewedAt after share is accessed', async () => {
+    const { token } = await createTestUser();
+    const docId = await uploadDocument(token);
+
+    const shareRes = await request(app)
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ documentIds: [docId], expiry: '24h' });
+
+    // Access the share (creates a ShareView)
+    await request(app).get(`/api/shares/${shareRes.body.token}`);
+
+    // Give fire-and-forget a moment to complete
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const listRes = await request(app)
+      .get('/api/shares')
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(listRes.status).toBe(200);
+    expect(listRes.body[0].lastViewedAt).not.toBeNull();
+  });
+});
+
+describe('GET /api/shares/:shareId/views (view history)', () => {
+  it('returns 401 when unauthenticated', async () => {
+    const res = await request(app).get('/api/shares/fakeid/views');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 403 when authenticated user does not own the share', async () => {
+    const owner = await createTestUser('views-owner@example.com');
+    const attacker = await createTestUser('views-attacker@example.com');
+    const docId = await uploadDocument(owner.token);
+
+    const shareRes = await request(app)
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ documentIds: [docId], expiry: '24h' });
+
+    const shareId = shareRes.body.id as string;
+
+    const res = await request(app)
+      .get(`/api/shares/${shareId}/views`)
+      .set('Authorization', `Bearer ${attacker.token}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('returns empty views array when share has never been accessed', async () => {
+    const { token } = await createTestUser();
+    const docId = await uploadDocument(token);
+
+    const shareRes = await request(app)
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ documentIds: [docId], expiry: '24h' });
+
+    const shareId = shareRes.body.id as string;
+
+    const res = await request(app)
+      .get(`/api/shares/${shareId}/views`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.shareId).toBeDefined();
+    expect(res.body.totalViews).toBe(0);
+    expect(res.body.uniqueViewers).toBe(0);
+    expect(res.body.views).toEqual([]);
+  });
+
+  it('returns view events after share is accessed', async () => {
+    const { token } = await createTestUser();
+    const docId = await uploadDocument(token);
+
+    const shareRes = await request(app)
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ documentIds: [docId], expiry: '24h' });
+
+    const shareToken = shareRes.body.token as string;
+    const shareId = shareRes.body.id as string;
+
+    // Access the share twice
+    await request(app).get(`/api/shares/${shareToken}`);
+    await request(app).get(`/api/shares/${shareToken}`);
+
+    // Give fire-and-forget time to complete
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const res = await request(app)
+      .get(`/api/shares/${shareId}/views`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalViews).toBe(2);
+    expect(Array.isArray(res.body.views)).toBe(true);
+    expect(res.body.views).toHaveLength(2);
+    expect(res.body.views[0].viewedAt).toBeDefined();
+    expect(res.body.views[0].userAgent).toBeDefined();
+    // recipientIp must NOT be exposed
+    expect(res.body.views[0].recipientIp).toBeUndefined();
+  });
+
+  it('computes uniqueViewers from distinct hashed IPs', async () => {
+    const { token } = await createTestUser();
+    const docId = await uploadDocument(token);
+
+    const shareRes = await request(app)
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ documentIds: [docId], expiry: '24h' });
+
+    const shareToken = shareRes.body.token as string;
+    const shareId = shareRes.body.id as string;
+
+    // In tests, req.ip is the same for all requests (loopback), so uniqueViewers should be 1
+    await request(app).get(`/api/shares/${shareToken}`);
+    await request(app).get(`/api/shares/${shareToken}`);
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const res = await request(app)
+      .get(`/api/shares/${shareId}/views`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.uniqueViewers).toBe(1);
+  });
+
+  it('caps view history at 20 most recent events', async () => {
+    const { token, userId } = await createTestUser();
+    const docId = await uploadDocument(token);
+
+    const shareRes = await request(app)
+      .post('/api/shares')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ documentIds: [docId], expiry: '24h' });
+
+    const shareId = shareRes.body.id as string;
+    const shareObjId = new mongoose.Types.ObjectId(shareId);
+
+    // Directly insert 25 ShareView records
+    const now = new Date();
+    const bulkViews = Array.from({ length: 25 }, (_, i) => ({
+      shareId: shareObjId,
+      userId,
+      viewedAt: new Date(now.getTime() - i * 1000),
+      recipientIp: `hash-${i}`,
+      userAgent: `agent-${i}`,
+    }));
+    await ShareViewModel.insertMany(bulkViews);
+
+    const res = await request(app)
+      .get(`/api/shares/${shareId}/views`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.views).toHaveLength(20);
   });
 });
