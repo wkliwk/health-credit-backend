@@ -15,6 +15,12 @@ router.post('/', authenticate, upload.single('file'), async (req: AuthRequest, r
       return;
     }
 
+    const { salt, iv } = req.body;
+    if (!salt || !iv) {
+      res.status(400).json({ error: 'Encryption salt and iv are required' });
+      return;
+    }
+
     const s3Key = await uploadBlob(req.file.buffer, req.file.mimetype);
 
     const retentionDays = req.body.retentionDays ? parseInt(req.body.retentionDays, 10) : null;
@@ -28,6 +34,8 @@ router.post('/', authenticate, upload.single('file'), async (req: AuthRequest, r
       mimeType: req.file.mimetype,
       size: req.file.size,
       s3Key,
+      encryptionSalt: salt,
+      encryptionIV: iv,
       expiresAt,
     });
 
@@ -36,6 +44,8 @@ router.post('/', authenticate, upload.single('file'), async (req: AuthRequest, r
       fileName: doc.fileName,
       mimeType: doc.mimeType,
       size: doc.size,
+      encryptionSalt: doc.encryptionSalt,
+      encryptionIV: doc.encryptionIV,
       createdAt: doc.createdAt,
       expiresAt: doc.expiresAt,
     });
@@ -58,6 +68,8 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
       fileName: d.fileName,
       mimeType: d.mimeType,
       size: d.size,
+      encryptionSalt: d.encryptionSalt,
+      encryptionIV: d.encryptionIV,
       createdAt: d.createdAt,
       expiresAt: d.expiresAt,
     })));

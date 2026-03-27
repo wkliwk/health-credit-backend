@@ -128,6 +128,8 @@ router.get('/:token', async (req: Request, res: Response) => {
         fileName: d.fileName,
         mimeType: d.mimeType,
         size: d.size,
+        encryptionSalt: d.encryptionSalt,
+        encryptionIV: d.encryptionIV,
         createdAt: d.createdAt,
       })),
       viewCount: share.viewCount,
