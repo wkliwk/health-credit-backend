@@ -14,9 +14,18 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
-    "testMatch": ["**/__tests__/**/*.test.ts"],
+    "testMatch": [
+      "<rootDir>/src/__tests__/**/*.test.ts"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/.claude/"
+    ],
     "testTimeout": 30000,
-    "coveragePathIgnorePatterns": ["/node_modules/", "/dist/"],
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ],
     "globals": {
       "ts-jest": {
         "tsconfig": "tsconfig.test.json"
@@ -70,7 +79,7 @@
     "mongodb-memory-server": "^11.0.1",
     "prettier": "^3.8.1",
     "supertest": "^7.2.2",
-    "ts-jest": "^29.4.6",
+    "ts-jest": "^29.4.9",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.3"
   }

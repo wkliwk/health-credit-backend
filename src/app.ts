@@ -5,6 +5,7 @@ import { healthRouter } from './routes/health';
 import { authRouter } from './routes/auth';
 import { documentsRouter } from './routes/documents';
 import { sharesRouter } from './routes/shares';
+import { bloodworkRouter } from './routes/bloodwork';
 import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
@@ -17,6 +18,7 @@ app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api/shares', sharesRouter);
+app.use('/api/bloodwork', bloodworkRouter);
 
 app.use(errorHandler);
 
